@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keep the actions referenced in this repo's workflows (and action.yml) up to date, so pinned
+  # versions/SHAs do not silently rot.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -1,0 +1,6 @@
+# Normalize everything to LF in the repository (critical for scripts on Linux runners)
+* text=auto eol=lf
+
+# Be explicit for the scripts and YAML
+*.py  text eol=lf
+*.yml text eol=lf

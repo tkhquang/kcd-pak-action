@@ -1,0 +1,61 @@
+# Copy this into your MOD repo at: .github/workflows/release.yml
+#
+# Push a tag like `v1.4.3` to build AND publish a GitHub Release. A manual run (or a non-tag push)
+# only builds and uploads an artifact; it does NOT publish a release.
+#
+# Least privilege: the `package` job runs with read-only permissions, and only the tag-gated
+# `publish` job is granted `contents: write`, so the release token is never exposed to the build.
+name: Release mod
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      mod-dir:
+        description: "Mod source dir (folder with mod.manifest)"
+        default: "src"
+
+# GitHub-owned actions are kept on major tags; the third-party publisher is pinned to a full
+# commit SHA. Pin every action to a SHA if you want the strictest supply-chain posture.
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true          # fetch Git LFS assets so they are packed, not pointer stubs
+
+      - name: Package into .pak
+        id: pak
+        uses: tkhquang/kcd-pak-action@v1     # @v1 is a moving compatibility tag; pin a SHA to freeze
+        with:
+          mod-dir: ${{ github.event.inputs.mod-dir || 'src' }}
+          compress: deflate                    # or 'store'
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kcd-mod-pak
+          path: dist/**
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # only this tag-gated job may create the GitHub Release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kcd-mod-pak
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
