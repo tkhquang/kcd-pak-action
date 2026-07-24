@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build a fixture mod (large Data tree, localization, level, cfg)
+        run: |
+          set -euo pipefail
+          mkdir -p fixture/Data/Scripts/Demo fixture/Data/Libs/Tables \
+                   fixture/Localization/English_xml fixture/Localization/German_xml \
+                   fixture/Data/Levels/rataje
+          cat > fixture/mod.manifest <<'EOF'
+          <?xml version="1.0" encoding="us-ascii"?>
+          <kcd_mod><info><name>Demo</name><modid>demo_mod</modid><version>0.1.0</version></info></kcd_mod>
+          EOF
+          printf 'demo_set_x =1\n' > fixture/mod.cfg
+          echo 'return 1' > fixture/Data/Scripts/Demo/main.lua
+          echo '<Table/>' > fixture/Localization/English_xml/text.xml
+          echo '<Table/>' > fixture/Localization/German_xml/text.xml
+          echo '<Level/>' > fixture/Data/Levels/rataje/level.xml
+          # Regression for the SIGPIPE bug: enough Data files that a `find | grep -q` guard would
+          # SIGPIPE and skip the main pak. The current -print -quit guard must still build it.
+          for index in $(seq 1 3000); do
+            echo "return $index" > "fixture/Data/Libs/Tables/table_$index.lua"
+          done
+
+      - name: Run the action (deflate)
+        id: pak
+        uses: ./
+        with:
+          mod-dir: fixture
+
+      - name: Assert layout, Levels exclusion, and the large Data pak
+        env:
+          ARCHIVE: ${{ steps.pak.outputs.archive }}
+        run: |
+          set -euo pipefail
+          test -f dist/demo_mod/mod.manifest
+          test -f dist/demo_mod/mod.cfg
+          test -f dist/demo_mod/Data/demo_mod.pak
+          test -f dist/demo_mod/Localization/English_xml.pak
+          test -f dist/demo_mod/Localization/German_xml.pak
+          test -f dist/demo_mod/Data/Levels/rataje/demo_mod.pak
+          test -f "$ARCHIVE"
+          # List members once to a file; grepping a file avoids a SIGPIPE-poisoned `| grep -q`
+          # pipeline under pipefail, which could false-pass the leak check on a very large pak.
+          unzip -Z1 dist/demo_mod/Data/demo_mod.pak > members.txt
+          entries=$(wc -l < members.txt)
+          echo "Data pak entries: $entries"
+          # Regression for the SIGPIPE bug: a poisoned guard would skip this pak, so a low count fails.
+          test "$entries" -ge 3001
+          # Positive arcname check: the Data/ prefix must be stripped inside the pak.
+          grep -qx 'Scripts/Demo/main.lua' members.txt || { echo "Data/ prefix not stripped" >&2; exit 1; }
+          # Levels must not leak into the main Data pak.
+          if grep -q '^Levels/' members.txt; then
+            echo "Levels leaked into the Data pak" >&2
+            exit 1
+          fi
+
+      - name: Assert every produced pak and the release zip are CryPak-safe
+        env:
+          ARCHIVE: ${{ steps.pak.outputs.archive }}
+        run: |
+          set -euo pipefail
+          mapfile -t paks < <(find dist/demo_mod -name '*.pak' | sort)
+          python3 tests/assert_pak_safe.py "$ARCHIVE" "${paks[@]}"
+
+      - name: Build a minimal fixture (no localization)
+        run: |
+          set -euo pipefail
+          mkdir -p fixture_min/Data/Scripts/Demo
+          cat > fixture_min/mod.manifest <<'EOF'
+          <?xml version="1.0" encoding="us-ascii"?>
+          <kcd_mod><info><name>Min</name><modid>min_mod</modid><version>0.0.1</version></info></kcd_mod>
+          EOF
+          echo 'return 1' > fixture_min/Data/Scripts/Demo/main.lua
+
+      - name: Pack the minimal fixture (store mode)
+        uses: ./
+        with:
+          mod-dir: fixture_min
+          out-dir: dist_min
+          compress: store
+
+      - name: Assert store reaches inner paks and the release zip, and no localization pak
+        run: |
+          set -euo pipefail
+          test -f dist_min/min_mod/Data/min_mod.pak
+          test ! -d dist_min/min_mod/Localization
+          # store must reach the inner pak AND the outer release zip.
+          python3 tests/assert_pak_safe.py --method 0 \
+            dist_min/min_mod/Data/min_mod.pak dist_min/min_mod-v0.0.1.zip
+
+      - name: Edge-case tests (validation, overlap, default layout, symlink)
+        run: |
+          set -uo pipefail
+          # A modid that does not start with an alphanumeric (e.g. '.git') must be rejected.
+          mkdir -p bad/Data
+          echo x > bad/Data/a.txt
+          printf '<kcd_mod><info><modid>.git</modid><version>1.0</version></info></kcd_mod>\n' \
+            > bad/mod.manifest
+          if python3 scripts/pak_kcd_mod.py bad out_bad 2>/dev/null; then
+            echo "unsafe modid was not rejected" >&2; exit 1
+          fi
+          # Output inside a packed folder (Data/) must be rejected (re-ingest risk).
+          if python3 scripts/pak_kcd_mod.py fixture fixture/Data/inside 2>/dev/null; then
+            echo "output inside a packed folder was not rejected" >&2; exit 1
+          fi
+          # Output elsewhere under the source (beside Data/) is allowed, including the default layout.
+          mkdir -p rootmod/Data
+          echo x > rootmod/Data/a.txt
+          printf '<kcd_mod><info><modid>root_mod</modid><version>1</version></info></kcd_mod>\n' \
+            > rootmod/mod.manifest
+          python3 scripts/pak_kcd_mod.py rootmod rootmod/out
+          test -f rootmod/out/root_mod/Data/root_mod.pak
+          # A symlink in the source must not pull its target into a pak.
+          mkdir -p symsrc/Data
+          echo real > symsrc/Data/real.txt
+          echo SECRET > outside_secret.txt
+          ln -s "$PWD/outside_secret.txt" symsrc/Data/leak.txt
+          printf '<kcd_mod><info><modid>sym_mod</modid><version>1</version></info></kcd_mod>\n' \
+            > symsrc/mod.manifest
+          python3 scripts/pak_kcd_mod.py symsrc dist_sym
+          unzip -Z1 dist_sym/sym_mod/Data/sym_mod.pak > sym_members.txt
+          if grep -q '^leak.txt$' sym_members.txt; then
+            echo "symlink target leaked into the pak" >&2; exit 1
+          fi
+          echo "self-test passed"

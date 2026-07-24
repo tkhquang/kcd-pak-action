@@ -1,0 +1,48 @@
+name: "KCD Pak"
+description: "Package a Kingdom Come: Deliverance (KCD1/KCD2) loose-file mod into .pak files and a release zip."
+author: "tkhquang"
+
+branding:
+  icon: "package"
+  color: "orange"
+
+inputs:
+  mod-dir:
+    description: "Path to the mod source folder (must contain mod.manifest). E.g. 'LootBeacon/src'."
+    required: false
+    default: "."
+  out-dir:
+    description: "Output directory for the packaged mod folder and the release .zip."
+    required: false
+    default: "dist"
+  compress:
+    description: "ZIP compression for the paks and the release zip: 'deflate' (smaller, default) or 'store'."
+    required: false
+    default: "deflate"
+
+outputs:
+  archive:
+    description: "Absolute path to the generated release .zip (e.g. /path/to/dist/loot_beacon-v1.4.3.zip)."
+    value: ${{ steps.pak.outputs.archive }}
+  mod-dir:
+    description: "Absolute path to the deploy-ready mod folder (e.g. /path/to/dist/loot_beacon)."
+    value: ${{ steps.pak.outputs.mod-dir }}
+  modid:
+    description: "Mod id read from mod.manifest."
+    value: ${{ steps.pak.outputs.modid }}
+  version:
+    description: "Version read from mod.manifest."
+    value: ${{ steps.pak.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: pak
+      shell: bash
+      env:
+        # Pass inputs through the environment; never interpolate ${{ }} into the run script text.
+        PAK_COMPRESS: ${{ inputs.compress }}
+        MOD_DIR: ${{ inputs.mod-dir }}
+        OUT_DIR: ${{ inputs.out-dir }}
+      run: |
+        python3 "$GITHUB_ACTION_PATH/scripts/pak_kcd_mod.py" "$MOD_DIR" "$OUT_DIR"
