@@ -49,7 +49,53 @@ jobs:
 ```
 
 Push a tag like `v1.4.3` and a `.pak` release is built and published automatically. The release
-file name uses the `<version>` from your `mod.manifest`, so keep the tag and manifest version in sync.
+file name uses the `<version>` from your `mod.manifest`, so keep the tag and manifest version in
+sync - or drive the release entirely from the manifest, below.
+
+## Release from the manifest version (no git tag)
+
+To make `mod.manifest` the single source of truth, use the `modid` and `version` outputs to build
+the release tag yourself and publish on a manual run. Bump `<version>` in `mod.manifest`, then run
+the workflow (Actions -> Run workflow) - no git tag needed. Full file:
+[`examples/consumer-release-manifest.yml`](examples/consumer-release-manifest.yml).
+
+```yaml
+on:
+  workflow_dispatch:
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.pak.outputs.modid }}-v${{ steps.pak.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: pak
+        uses: tkhquang/kcd-pak-action@v1
+        with:
+          mod-dir: src
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod-pak
+          path: dist/**
+          if-no-files-found: error
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mod-pak
+          path: dist
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.package.outputs.tag }}
+          files: dist/*.zip
+          generate_release_notes: true
+```
 
 ## Inputs
 

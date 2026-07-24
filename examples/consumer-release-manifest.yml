@@ -1,0 +1,58 @@
+# Copy this into your MOD repo at: .github/workflows/release.yml
+#
+# Manifest-driven release: mod.manifest is the single source of truth. Bump its <version>, then
+# run this workflow (Actions -> Run workflow). It reads the version from the manifest (via the
+# action's outputs), builds the .pak, and publishes a Release tagged <modid>-v<version>. No git
+# tag needed. Least privilege: the build job is read-only; only the publish job may write.
+name: Release mod
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.pak.outputs.modid }}-v${{ steps.pak.outputs.version }}
+      version: ${{ steps.pak.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Package into .pak
+        id: pak
+        uses: tkhquang/kcd-pak-action@v1
+        with:
+          mod-dir: src
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-pak
+          path: dist/**
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mod-pak
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.package.outputs.tag }}          # e.g. loot_beacon-v1.4.3, from mod.manifest
+          name: Release ${{ needs.package.outputs.version }}
+          files: dist/*.zip
+          generate_release_notes: true
