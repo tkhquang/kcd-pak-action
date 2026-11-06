@@ -6,6 +6,13 @@ moving-tag scheme described in the README.
 
 ## [Unreleased]
 
+## [1.1.0]
+
+### Added
+
+- Pak folders: a folder `Data/<name>.pak/` packs into a pak of its own, `Data/<name>.pak`, and stays out of
+  `Data/<modid>.pak`, so a mod can ship parts players remove by deleting one file.
+
 ## [1.0.0]
 
 ### Added

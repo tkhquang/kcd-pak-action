@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 import zipfile
+from typing import Sequence
 
 # CPython's zipfile switches to ZIP64 near 2 GiB (below the 4 GiB uint32 max) and past 65535
 # entries. CryPak predates ZIP64 and may reject such archives, so warn before that point.
@@ -38,9 +39,14 @@ def is_unsafe_arcname(name: str) -> bool:
     return ".." in name.split("/")                    # parent-directory component
 
 
-def collect_entries(source_dir: str, base_dir: str, exclude: str, include_pak: bool) -> list[tuple[str, str]]:
-    """Return sorted (absolute_path, archive_name) pairs for every file to pack."""
-    exclude_prefix = exclude.rstrip("/") + "/" if exclude else ""
+def collect_entries(source_dir: str, base_dir: str, exclude: str | Sequence[str],
+                    include_pak: bool) -> list[tuple[str, str]]:
+    """Return sorted (absolute_path, archive_name) pairs for every file to pack.
+
+    EXCLUDE is one relative subtree or several ("" or [] for none).
+    """
+    excludes = [exclude] if isinstance(exclude, str) else list(exclude)
+    excludes = [item.rstrip("/") for item in excludes if item]
     entries: list[tuple[str, str]] = []
     for directory, _subdirs, filenames in os.walk(source_dir, onerror=_reraise):
         for filename in filenames:
@@ -55,7 +61,7 @@ def collect_entries(source_dir: str, base_dir: str, exclude: str, include_pak: b
             if not include_pak and relative_to_source.lower().endswith(".pak"):
                 print(f"warning: skipping existing .pak file: {relative_to_source}", file=sys.stderr)
                 continue
-            if exclude and (relative_to_source == exclude or relative_to_source.startswith(exclude_prefix)):
+            if any(relative_to_source == item or relative_to_source.startswith(item + "/") for item in excludes):
                 continue
             archive_name = os.path.relpath(absolute_path, base_dir).replace(os.sep, "/")
             if is_unsafe_arcname(archive_name):
@@ -97,7 +103,7 @@ def write_archive(entries: list[tuple[str, str]], output_path: str, store: bool)
             archive.write(absolute_path, archive_name)
 
 
-def pack(source: str, output: str, base: str | None = None, exclude: str = "",
+def pack(source: str, output: str, base: str | None = None, exclude: str | Sequence[str] = "",
          store: bool = False, include_pak: bool = False) -> int:
     """Pack SOURCE into the ZIP at OUTPUT. Returns the entry count, or 0 if skipped as empty."""
     if not os.path.isdir(source):

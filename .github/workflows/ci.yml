@@ -31,6 +31,9 @@ jobs:
           echo '<Table/>' > fixture/Localization/English_xml/text.xml
           echo '<Table/>' > fixture/Localization/German_xml/text.xml
           echo '<Level/>' > fixture/Data/Levels/rataje/level.xml
+          # A pak folder: Data/<name>.pak/** becomes Data/<name>.pak of its own.
+          mkdir -p fixture/Data/demo_part.pak/Animations
+          echo 'clip' > fixture/Data/demo_part.pak/Animations/part.caf
           # Regression for the SIGPIPE bug: enough Data files that a `find | grep -q` guard would
           # SIGPIPE and skip the main pak. The current -print -quit guard must still build it.
           for index in $(seq 1 3000); do
@@ -67,6 +70,14 @@ jobs:
           # Levels must not leak into the main Data pak.
           if grep -q '^Levels/' members.txt; then
             echo "Levels leaked into the Data pak" >&2
+            exit 1
+          fi
+          # The pak folder is a pak of its own, its contents at the root, and stays out of the main pak.
+          test -f dist/demo_mod/Data/demo_part.pak
+          unzip -Z1 dist/demo_mod/Data/demo_part.pak > part_members.txt
+          grep -qx 'Animations/part.caf' part_members.txt || { echo "pak folder prefix not stripped" >&2; exit 1; }
+          if grep -q 'demo_part.pak/' members.txt; then
+            echo "the pak folder leaked into the main Data pak" >&2
             exit 1
           fi
 

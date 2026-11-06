@@ -7,7 +7,8 @@ the actual packing is done by zip_pak.py (Python's zipfile writes none of those 
 README.md for the full rationale and the folder->pak mapping.
 
 Usage: pak_kcd_mod.py MOD_SRC_DIR [OUT_DIR] [--compress deflate|store]
-  MOD_SRC_DIR  Folder containing mod.manifest (plus Data/, Localization/, mod.cfg)
+  MOD_SRC_DIR  Folder containing mod.manifest (plus Data/, Localization/, mod.cfg); a folder
+               Data/<name>.pak/ becomes a pak of its own
   OUT_DIR      Output root (default: dist)
 """
 from __future__ import annotations
@@ -25,6 +26,7 @@ MANIFEST_NAME = "mod.manifest"
 CONFIG_NAME = "mod.cfg"
 MODID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 VERSION_PATTERN = re.compile(r"^[A-Za-z0-9._+-]*$")
+PAK_FOLDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.pak$", re.IGNORECASE)
 
 
 def fail(message: str) -> None:
@@ -109,12 +111,31 @@ def main() -> None:
     print(f"modid={mod_id} version={mod_version or '<none>'}")
     store = arguments.compress == "store"
 
-    # Data/** (excluding Data/Levels/**) -> Data/<modid>.pak. The packer skips an empty result, so
-    # a Data tree that holds only Levels produces no main pak.
+    # Data/<name>.pak/** -> Data/<name>.pak: a folder named like a pak becomes a pak of its own, its
+    # contents at the pak's root as Data/'s are in <modid>.pak. The game mounts every pak in a mod's
+    # Data/, so a mod can ship parts a player removes by deleting one file.
     data_dir = os.path.join(source, "Data")
+    pak_folders = []
+    if os.path.isdir(data_dir) and not os.path.islink(data_dir):
+        for name in sorted(os.listdir(data_dir)):
+            path = os.path.join(data_dir, name)
+            if not name.lower().endswith(".pak") or not os.path.isdir(path) or os.path.islink(path):
+                continue
+            if not PAK_FOLDER_PATTERN.match(name):
+                fail(f"Data/{name}/: a pak folder name takes letters, digits, '.', '_' and '-' only")
+            if name.lower() == f"{mod_id}.pak".lower():
+                fail(f"Data/{name}/ would overwrite the main pak {mod_id}.pak; give it another name")
+            if any(name.lower() == other.lower() for other in pak_folders):
+                fail(f"Data/{name}/ differs from another pak folder only by case")
+            pak_folders.append(name)
+
+    # Data/** (excluding Data/Levels/** and the pak folders) -> Data/<modid>.pak. The packer skips an
+    # empty result, so a Data tree that holds only Levels or pak folders produces no main pak.
     if os.path.isdir(data_dir) and not os.path.islink(data_dir):
         zip_pak.pack(data_dir, os.path.join(deploy_dir, "Data", f"{mod_id}.pak"),
-                     exclude="Levels", store=store)
+                     exclude=["Levels", *pak_folders], store=store)
+        for name in pak_folders:
+            zip_pak.pack(os.path.join(data_dir, name), os.path.join(deploy_dir, "Data", name), store=store)
 
     # Localization/<Lang>/** -> Localization/<Lang>.pak (symlinked language dirs are skipped).
     localization_dir = os.path.join(source, "Localization")

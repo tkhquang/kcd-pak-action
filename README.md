@@ -125,11 +125,17 @@ only the trailing part. If you pass an absolute or parent-relative `out-dir`, th
 Given a source folder with `mod.manifest` (`<modid>loot_beacon</modid>`):
 
 ```text
-Data/**  (except Data/Levels/**)   ->  Data/<modid>.pak         (Data/ prefix stripped)
-Localization/<Lang>/**             ->  Localization/<Lang>.pak
-Data/Levels/<level>/**             ->  Data/Levels/<level>/<modid>.pak
-mod.manifest, mod.cfg              ->  kept LOOSE (not packed)
+Data/**  (except Levels and pak folders)  ->  Data/<modid>.pak   (Data/ prefix stripped)
+Data/<name>.pak/**                       ->  Data/<name>.pak    (a pak folder; Data/<name>.pak/ prefix stripped)
+Localization/<Lang>/**                   ->  Localization/<Lang>.pak
+Data/Levels/<level>/**                   ->  Data/Levels/<level>/<modid>.pak
+mod.manifest, mod.cfg                    ->  kept LOOSE (not packed)
 ```
+
+**Pak folders** (optional): a folder directly under `Data/` whose name ends in `.pak` becomes a pak of its
+own, with its contents at the pak's root. The game mounts every pak in a mod's `Data/`, so this ships parts
+of a mod that players can remove by deleting one file. A pak folder's name takes letters, digits, `.`, `_`
+and `-`, and can't be `<modid>.pak`. Two paks must not carry the same file path: only one of them loads.
 
 Existing `.pak` files in the source are skipped (they are build outputs, not source) with a
 warning. Symlinks are skipped rather than followed.
